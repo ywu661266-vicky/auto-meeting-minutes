@@ -16,6 +16,23 @@ agent_created: true
 - 用户要求按"海南龙源新能源有限公司"格式输出会议纪要
 - 用户希望批量处理多次周例会录音
 
+## 客户交付说明（零配置 · 只丢一个音频）
+
+> ✅ **本 skill 面向非技术客户的交付目标是：客户只需把会议录音丢进来，一条命令自动产出符合海南龙源模板的 .docx 会议纪要，全程零配置、不报错。**
+
+一键命令（客户只需这一条）：
+```bash
+python scripts/make_minutes.py <会议录音.mp3>
+```
+脚本内部全自动完成：**① 自动保障 Vosk 中文模型（大模型优先，首次运行自动下载；无网则用小模型兜底）→ ② 本地离线转写 → ③ 二次校对（清洗重复字/噪声、分句、结构化分段）→ ④ 从音频文件自动读日期（ID3 优先，否则文件时间；周例会对齐周一）→ ⑤ 按公式自动算序号 → ⑥ 套海南龙源模板生成 .docx**。
+
+- **日期与序号全自动**：客户无需提供任何日期/序号，全部从音频文件推算（详见「自动读取会议日期」）。
+- **容错不崩**：任何环节异常都不崩溃，始终产出一份合法、可读、标注清晰的纪要 docx（转写失败时明确标注「占位纪要，请检查网络后重跑」）。
+- **格式 100% 还原**：严格套用客户真实周例会模板，标题/文件名/段落结构逐字一致（见「输出格式强制规范」）。
+- **二次校对**：`proofread_transcript.py` 对原始转写做规则化清洗与分句，低质量转写会明确标注置信度，提示人工核对专有名词/人名。
+
+> ⚠️ **转写质量取决于模型**：默认优先使用大模型 `vosk-model-cn-0.22`（带标点、准确率高）；若客户机首次运行无法下载大模型，则自动用小模型兜底（质量有限，纪要会标注「低置信度，需人工校对」）。最高质量也可走路径 A（OpenAI Whisper API，需 `OPENAI_API_KEY`）。
+
 ## 输出格式强制规范
 
 > **以下格式必须严格遵循，不得有任何改动。**
@@ -413,15 +430,25 @@ pip install vosk imageio-ffmpeg
 ```
 > `imageio-ffmpeg` 会自动下载 ffmpeg 二进制，免去系统安装 ffmpeg。
 
-**模型准备（二选一）**：
-- 小模型（约 44MB，快、中文准确率一般，仅适合草稿）：
-  从 GitHub 仓库 `jimy7945/vosk-model-cn` 下载 `zip.part0 / zip.part1 / zip.part2` 合并解压。
+**模型准备（无需手工下载 · 脚本自动保障）**：
+`scripts/ensure_model.py` 会在运行 `make_minutes.py` 时自动定位/下载模型，优先级：
+1. 环境变量 `VOSK_MODEL_DIR` 指向的模型目录；
+2. skill 自带 `scripts/models/vosk-model-cn-0.22`（大模型）；
+3. skill 自带 `scripts/models/vosk-model-small-cn-0.22`（小模型兜底）；
+4. 首次运行自动下载大模型（依次尝试 `VOSK_MODEL_URL` 自定义镜像 → `alphacephei` 官方源）；
+5. 大模型下载失败则自动下载小模型兜底。
+
 - 大模型 `vosk-model-cn-0.22`（约 1.36GB，带标点、准确率高，生产推荐）：
   `https://alphacephei.com/vosk/models/vosk-model-cn-0.22.zip`
+- 小模型（约 44MB，快、中文准确率一般，仅适合草稿）：
+  `https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip`
+- 如需更快镜像（如国内源），设置环境变量即可覆盖：`export VOSK_MODEL_URL=https://你的镜像/vosk-model-cn-0.22.zip`
 
-模型目录可用环境变量 `VOSK_MODEL_DIR` 指定，默认 `scripts/models/vosk-model-small-cn-0.22`。
+> 默认无需任何配置：客户首次运行 `make_minutes.py` 会自动拉取大模型（约 1.3GB，保持联网即可），之后复用本地模型。
 
-**调用**：
+模型目录可用环境变量 `VOSK_MODEL_DIR` 手动指定，覆盖自动定位逻辑。
+
+**调用（通常无需直接调用，由 make_minutes.py 编排）**：
 ```bash
 python scripts/transcribe_vosk.py <音频文件路径> [--output 输出.txt] [--model-dir 模型目录]
 ```
@@ -551,14 +578,42 @@ python scripts/get_recording_date.py <音频文件路径>
 - `snap_to_monday(date)` 把任意日期对齐到周一（周例会默认周一）。
 - 仅用标准库，无第三方依赖。
 
-### `scripts/make_minutes.py`（新增 · 一键编排）
+### `scripts/make_minutes.py`（新增 · 一键编排 · 零配置）
 
-客户只需丢一个音频，自动完成「转写 → 读日期 → 算序号 → 生成 docx」。
+客户只需丢一个音频，自动完成「保障模型 → 转写 → 二次校对 → 读日期 → 算序号 → 生成 docx」。
 
 ```bash
 python scripts/make_minutes.py <音频文件路径> [--output 输出目录] [--transcript 已有转写.txt] [--model-dir Vosk模型目录]
 ```
 
-- 默认走本地 Vosk 离线转写（路径 E）；传 `--transcript` 可跳过转写复用已有文本。
+- **无需任何参数即可跑通**：模型自动保障（`ensure_model.py`）、日期自动读、序号自动算；仅 `--model-dir` 可手动覆盖模型目录。
+- 转写后自动调用 `proofread_transcript.py` 做二次校对（清洗重复字/噪声、分句、结构化分段），并在纪要底注标注转写置信度。
+- 容错：转写失败 / 模型缺失 / 日期异常均不崩溃，始终产出合法 docx（失败时明确标注占位与原因）。
 - 输出文件名自动包含正确年份与序号：`海南龙源新能源有限公司2026年第{序号}次周例会会议纪要.docx`
 - 依赖：vosk, imageio-ffmpeg, python-docx
+
+### `scripts/ensure_model.py`（新增 · 模型自动保障 · 零配置）
+
+自动定位或下载 Vosk 中文模型，确保「有模型可用」，无需手工配置。
+
+```bash
+python scripts/ensure_model.py
+# 输出：MODEL_DIR=... QUALITY=large|small
+```
+
+- 定位优先级见「路径 E · 模型准备」；缺失时自动下载大模型，失败兜底小模型。
+- 可用环境变量 `VOSK_MODEL_URL` 指定更快下载镜像。
+
+### `scripts/proofread_transcript.py`（新增 · 二次校对）
+
+对 Vosk 等离线 ASR 原始转写做规则化校对，纯标准库、无依赖。
+
+```bash
+python scripts/proofread_transcript.py <转写.txt>
+# 输出：[置信度] high|medium|low  发言人=[...]  并打印分句后正文
+```
+
+- 清洗：去除 3 连及以上重复汉字（如「的的的」→「的」）、零散拉丁噪声、多余空格。
+- 分句：大模型（带标点）按标点切分；小模型按长度+线索词启发式断句并补句号。
+- 结构化：按关键词把句子归入「部门汇报 / 领导强调 / 其他」。
+- 置信度：小模型（无标点）上限降级为 low/medium，并提示升级大模型或 Whisper API。
