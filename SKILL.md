@@ -374,6 +374,31 @@ with sr.AudioFile(audio_path) as source:
 - **网易见外**：https://jianwai.youdao.com
 - **腾讯交互翻译**：支持音频转写
 
+### 路径 E：本地 Vosk 离线转写（推荐兜底 · 无需 OpenAI Key / 无需外网 API）
+
+适用于**客户本机没有 OpenAI Key、或网络无法直连 OpenAI/HuggingFace** 的环境。纯离线、不依赖 torch（可规避部分 Windows 机器 WDAC/应用控制策略拦截 torch DLL 的问题）。
+
+**依赖安装**：
+```bash
+pip install vosk imageio-ffmpeg
+```
+> `imageio-ffmpeg` 会自动下载 ffmpeg 二进制，免去系统安装 ffmpeg。
+
+**模型准备（二选一）**：
+- 小模型（约 44MB，快、中文准确率一般，仅适合草稿）：
+  从 GitHub 仓库 `jimy7945/vosk-model-cn` 下载 `zip.part0 / zip.part1 / zip.part2` 合并解压。
+- 大模型 `vosk-model-cn-0.22`（约 1.36GB，带标点、准确率高，生产推荐）：
+  `https://alphacephei.com/vosk/models/vosk-model-cn-0.22.zip`
+
+模型目录可用环境变量 `VOSK_MODEL_DIR` 指定，默认 `scripts/models/vosk-model-small-cn-0.22`。
+
+**调用**：
+```bash
+python scripts/transcribe_vosk.py <音频文件路径> [--output 输出.txt] [--model-dir 模型目录]
+```
+
+> ⚠️ 质量说明：Vosk small 模型对带口音/重叠说话/背景噪声的会议录音识别率有限，输出常无标点、专有名词易错。建议：生产环境优先用**路径 A（OpenAI Whisper API）**或**大模型 vosk-model-cn-0.22**；small 模型仅用于离线草稿，生成纪要后务必人工校对关键人名/项目名/待办。
+
 ---
 
 ## 输出示例（基于客户真实样本）
