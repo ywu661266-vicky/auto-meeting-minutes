@@ -186,7 +186,7 @@ agent_created: true
 从转写文本中提取以下信息，**严格按照客户真实格式**：
 
 **会议基本信息**：
-- 年份、序号（从录音时间或用户输入获取，见下方"序号计算方法"）
+- 年份、序号（**从音频文件自动读取会议日期**后计算，见下方「自动读取会议日期」，无需用户输入）
 - 会议时间（转换为 `YYYY年MM月DD日（周X）{上午/下午}HH:MM`）
 - 会议地点（通常为"公司海口大会议室"或"线上会议"）
 - 参会人员（区分公司领导、部门负责人、列席人员）
@@ -224,6 +224,35 @@ print(calculate_meeting_number(datetime(2026, 9, 21)))  # 输出: 30
 **公式**：`序号 = 25 + (目标日期 - 2026-08-17) / 7`
 
 > ⚠️ 注意：此计算方法仅适用于2026年的周例会。如果用户提供的日期在2026年8月17日之前，需要用户提供正确的序号。
+
+### 自动读取会议日期（关键能力：客户只需丢一个音频，无需提供任何日期）
+
+skill 自动从音频文件确定会议日期，不向客户索要日期/序号：
+
+```bash
+python scripts/get_recording_date.py <音频文件路径>
+# 输出示例：
+# READ_DATE=2026-09-12 SOURCE=filesystem
+# MONDAY=2026-09-07
+```
+
+读取优先级：
+1. **ID3v2 录制时间帧**：`TDRC` / `TDOR` / `TORY` / `TYER` / `TDAT`（手机原生录音、专业录音笔常带此元数据）。
+2. **文件系统修改时间（mtime）兜底**：音频若无 ID3 日期（如微信转发、二次拷贝的 mp3），用文件落盘时间近似录制时间，并在纪要底注标注来源 `SOURCE=filesystem`。
+
+> ⚠️ 周例会默认周一召开。`get_recording_date.snap_to_monday()` 把读到的任意日期对齐到所在周的周一，再代入序号公式。例：文件时间 2026-09-12（周六）→ 对齐 2026-09-07（周一）→ 第28次。
+
+完整自动链路（或直接使用 `scripts/make_minutes.py` 一键出纪要）：
+```python
+from get_recording_date import get_recording_date, snap_to_monday
+from calculate_meeting_number import calculate_meeting_number
+from datetime import datetime
+
+raw, src = get_recording_date(audio_path)      # 自动读日期
+meeting   = snap_to_monday(raw)                # 对齐周一
+number    = calculate_meeting_number(datetime(meeting.year, meeting.month, meeting.day))  # 第XX次
+# 文件名：海南龙源新能源有限公司2026年第{number}次周例会会议纪要.docx
+```
 
 **各部门汇报内容**：
 - 哪些部门汇报了
@@ -507,3 +536,29 @@ python scripts/transcribe_audio.py <音频文件路径> [--model medium] [--outp
 环境变量：
 - `OPENAI_API_KEY`：OpenAI API 密钥
 - `OPENAI_BASE_URL`：自定义 API 端点（可选）
+
+### `scripts/get_recording_date.py`（新增 · 自动读日期）
+
+从音频文件自动读取会议/录制日期，**无需客户提供**。
+
+```bash
+python scripts/get_recording_date.py <音频文件路径>
+# READ_DATE=2026-09-12 SOURCE=filesystem
+# MONDAY=2026-09-07
+```
+
+- 优先解析 ID3v2 录制时间帧（TDRC/TDOR/TORY/TYER/TDAT）；无则兜底用文件系统修改时间。
+- `snap_to_monday(date)` 把任意日期对齐到周一（周例会默认周一）。
+- 仅用标准库，无第三方依赖。
+
+### `scripts/make_minutes.py`（新增 · 一键编排）
+
+客户只需丢一个音频，自动完成「转写 → 读日期 → 算序号 → 生成 docx」。
+
+```bash
+python scripts/make_minutes.py <音频文件路径> [--output 输出目录] [--transcript 已有转写.txt] [--model-dir Vosk模型目录]
+```
+
+- 默认走本地 Vosk 离线转写（路径 E）；传 `--transcript` 可跳过转写复用已有文本。
+- 输出文件名自动包含正确年份与序号：`海南龙源新能源有限公司2026年第{序号}次周例会会议纪要.docx`
+- 依赖：vosk, imageio-ffmpeg, python-docx
